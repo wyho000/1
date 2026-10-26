@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { ChemicalSource } from '../simulation';
+import { CHEMICALS, sourceLabel, sourceStrength } from '../chemicals';
 
 export interface WorldState {
   x: number;
@@ -25,13 +26,13 @@ interface WorldCanvasProps {
 
 const WIDTH = 1000;
 const HEIGHT = 700;
-const PALETTE = {
-  'ethyl-acetate': { rgb: '167, 223, 177', hex: '#a7dfb1', label: '에틸 아세테이트' },
-  benzaldehyde: { rgb: '238, 173, 120', hex: '#eead78', label: '벤즈알데하이드' },
-  co2: { rgb: '144, 189, 241', hex: '#90bdf1', label: '이산화탄소' },
-};
-
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+function sourceColor(source: ChemicalSource) {
+  const hex = CHEMICALS[source.chemical].color;
+  const rgb = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)).join(', ');
+  return { hex, rgb };
+}
 
 function frame(width: number, height: number) {
   const scale = Math.min(width / WIDTH, height / HEIGHT);
@@ -39,9 +40,11 @@ function frame(width: number, height: number) {
 }
 
 function drawField(ctx: CanvasRenderingContext2D, source: ChemicalSource) {
-  if (!source.enabled || source.amount <= 0) return;
-  const color = PALETTE[source.chemical];
-  const strength = clamp(source.amount / 100, 0, 1);
+  // Use the engine's dimensionless source amplitude. Nominal solution percent
+  // is not a measured vapor concentration; DW/PBS have zero olfactory input.
+  const strength = sourceStrength(source);
+  if (strength <= 0) return;
+  const color = sourceColor(source);
   const radius = Math.max(25, source.spread) * 2.4;
   const gradient = ctx.createRadialGradient(source.x, source.y, 0, source.x, source.y, radius);
   gradient.addColorStop(0, `rgba(${color.rgb}, ${0.20 * strength})`);
@@ -65,22 +68,23 @@ function drawField(ctx: CanvasRenderingContext2D, source: ChemicalSource) {
 }
 
 function drawSource(ctx: CanvasRenderingContext2D, source: ChemicalSource, index: number, selected: boolean, time: number) {
-  const color = PALETTE[source.chemical];
-  const enabled = source.enabled && source.amount > 0;
+  const color = sourceColor(source);
+  const strength = sourceStrength(source);
+  const isControl = CHEMICALS[source.chemical].isControl;
   const pulse = 0.5 + Math.sin(time * 1.7 + index) * 0.5;
   ctx.save();
   ctx.translate(source.x, source.y);
   ctx.globalAlpha = source.enabled ? 1 : 0.38;
 
-  if (enabled) {
+  if (strength > 0) {
     const halo = ctx.createRadialGradient(0, 0, 8, 0, 0, 44);
-    halo.addColorStop(0, `rgba(${color.rgb}, 0.18)`);
+    halo.addColorStop(0, `rgba(${color.rgb}, ${0.18 * strength})`);
     halo.addColorStop(1, `rgba(${color.rgb}, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(0, 0, 44, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = `rgba(${color.rgb}, ${0.08 + (1 - pulse) * 0.12})`;
+    ctx.strokeStyle = `rgba(${color.rgb}, ${(0.08 + (1 - pulse) * 0.12) * strength})`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(0, 0, 26 + pulse * 12, 0, Math.PI * 2);
@@ -135,7 +139,7 @@ function drawSource(ctx: CanvasRenderingContext2D, source: ChemicalSource, index
     }
   }
 
-  const label = `${String.fromCharCode(65 + index)}  ${color.label}`;
+  const label = `${String.fromCharCode(65 + index)}  ${sourceLabel(source)}${isControl ? ' · 대조군' : ''}`;
   ctx.font = '500 13px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

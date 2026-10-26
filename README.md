@@ -29,13 +29,31 @@ npm run preview # 빌드한 앱 확인, 기본 포트 4173
 
 ```sh
 python3 scripts/browser-smoke.py
+python3 scripts/chemical-browser-smoke.py
 ```
 
 다른 환경에서는 Python `playwright`와 Chromium이 추가로 필요합니다. `FLYWIRE_BASE_URL`과 `FLYWIRE_CHROMIUM_PATH`로 검사 주소와 브라우저 경로를 지정할 수 있습니다. 기본 앱 실행과 단위 테스트에는 필요하지 않습니다.
 
+## 추가된 실험 조건
+
+왼쪽의 화학물질 목록에서 아래 **11개 조건**을 선택해 추가할 수 있습니다. 기존 에틸 아세테이트·벤즈알데하이드·이산화탄소도 유지되어 총 14개의 기본 조건을 제공합니다.
+
+| 물질 | 선택할 수 있는 조건 |
+| --- | --- |
+| 2-페닐에탄올 (2-phenylethanol) | 0.01%, 0.05%, 0.1% |
+| 에탄올 | 1%, 5%, 10% |
+| 아세트산 | 0.1%, 0.5%, 1% |
+| DW (증류수) | 대조군 |
+| PBS buffer | 1× 대조군 |
+
+요청의 ‘투페닐에탄올’은 **2-페닐에탄올**로 해석했습니다. **용액 농도(%)와 상대 방출량(a.u.)은 서로 다른 설정**입니다. 농도의 기준은 기본적으로 ‘미지정’이며 v/v 또는 w/v를 기록할 수 있습니다. 기준을 선택하는 것만으로 실제 기체 농도나 반응을 환산하지는 않습니다.
+
+새 유기물의 유인·회피 반응은 사용자가 조절하는 **모델 가정**입니다. DW와 1× PBS는 이 후각 모델에서 신호가 없는 대조군으로 처리합니다. 실제 초파리의 반응을 예측하거나 실험 농도를 보정한 데이터가 아닙니다. 자세한 계산과 한계는 [화학물질 모델 설명](docs/chemical-model.md)을 참고하세요.
+
 ## 조작
 
-- **화학물질**: 에틸 아세테이트(먹이 유인), 벤즈알데하이드·이산화탄소(이 모델의 회피 자극)를 최대 6개 배치합니다. 스위치로 각 발생원을 켜고 끕니다.
+- **화학물질**: 목록에서 물질과 농도 조건을 선택하고 `+`로 추가합니다. 같은 조건을 여러 위치에 배치할 수 있으며, 발생원은 최대 16개입니다. 스위치로 각 발생원을 켜고 끄며 선택한 발생원을 삭제할 수 있습니다. 마지막 1개는 남겨 두어야 합니다.
+- **용액 농도·반응 가정**: 새 유기물의 용액 농도 조건, 농도 기준, 유인·회피 강도를 조절합니다. 음수는 회피, 양수는 유인, 0은 방향 선호가 없는 모델 설정입니다. DW와 PBS에는 유기물의 농도·후각 반응 설정을 적용하지 않습니다.
 - **방출량·거리·확산**: 선택한 물질의 슬라이더로 조절합니다. 거리는 현재 초파리 위치를 기준으로 발생원을 이동시키며, 이후 초파리가 움직이면 다시 변합니다. 공간 경계에서는 위치가 제한됩니다.
 - **위치**: 발생원을 드래그하거나 지도 빈 곳을 누릅니다. X/Y 입력으로 키보드 조절도 가능합니다. 초파리의 위치는 조작하지 않습니다.
 - **관찰**: 일시정지, 초기화, 0.5–4배속, 이동 경로와 농도장 표시를 제공합니다. 일시정지 중에도 환경은 편집할 수 있고, 재생하면 변경한 자극에 반응합니다.
@@ -56,13 +74,20 @@ python3 scripts/browser-smoke.py
 
 ```text
 src/simulation.ts             감각·기억·자율 행동 엔진
+src/chemicals.ts              물질·농도 조건과 상대 자극 설정
 src/components/WorldCanvas.tsx 실험장, 농도장, 발생원 드래그
 src/components/BrainMap.tsx   실제 뉴런 좌표와 모의 활성 지도
 src/App.tsx                   실험 조작·관측·기록 저장
 public/data/flywire-brain.json 출처가 포함된 로컬 해부학 데이터
 scripts/build-brain-data.py   원본 검증 및 표본 데이터 재생성
 tests/simulation.test.ts      행동 및 모델 검증
+tests/chemicals.test.ts       농도 조건·대조군·반응 가정 검증
 scripts/browser-smoke.py      데스크톱·모바일 기능 검증
+scripts/chemical-browser-smoke.py 새 조건의 화면 조작 및 기록 저장 검증
 ```
+
+## 이미 내려받은 버전 업데이트
+
+GitHub의 파일이 바뀌어도 PC에 압축을 풀어 둔 파일은 자동으로 갱신되지 않습니다. 실행 중인 이전 버전의 터미널에서 **Ctrl+C**를 누른 뒤, `flywire-simulator` 브랜치의 ZIP을 다시 다운로드해 **별도 폴더에 압축을 푸세요**. 새 폴더의 `package.json`이 보이는 위치에서 터미널을 열고 `npm ci`, `npm run dev`를 순서대로 실행합니다. Windows에서는 `npm.cmd ci`, `npm.cmd run dev`도 사용할 수 있습니다. Node.js는 이미 설치되어 있다면 다시 설치할 필요가 없습니다.
 
 출처: Schlegel et al. (2024), *Whole-brain annotation and multi-connectome cell typing of Drosophila*; Dorkenwald et al. (2024), *Neuronal wiring diagram of an adult brain*. 자세한 인용·이용 조건은 데이터 출처 문서에 있습니다.

@@ -9,48 +9,19 @@
  * never reads a chemical source's direction or chooses a goal position.
  */
 
+import { CHEMICALS, sourceStrength, sourceValence } from './chemicals.ts'
+import type { ChemicalId, ChemicalSource } from './chemicals.ts'
+export { CHEMICALS } from './chemicals.ts'
+export type { ChemicalId, ChemicalSource } from './chemicals.ts'
+
 export const ARENA_WIDTH = 1000
 export const ARENA_HEIGHT = 700
 
-export type ChemicalId = 'ethyl-acetate' | 'benzaldehyde' | 'co2'
 export type Behavior = 'exploring' | 'tracking' | 'feeding' | 'avoiding' | 'resting'
 export type RegionId = 'AL_L' | 'AL_R' | 'LH_L' | 'LH_R' | 'MB_L' | 'MB_R' | 'CX' | 'DN'
 
-export interface ChemicalSource {
-  id: string
-  chemical: ChemicalId
-  x: number
-  y: number
-  /** Relative emitter amount, 0–100; not a measured physical unit. */
-  amount: number
-  /** Gaussian diffusion length in arena coordinates. */
-  spread: number
-  enabled: boolean
-}
-
-export const CHEMICALS: Record<ChemicalId, {
-  name: string
-  english: string
-  color: string
-  description: string
-  valence: number
-}> = {
-  'ethyl-acetate': {
-    name: '에틸 아세테이트', english: 'Ethyl acetate', color: '#a7dfb1',
-    description: '과일 향 · 먹이 탐색을 유도하는 유인 자극', valence: 1,
-  },
-  benzaldehyde: {
-    name: '벤즈알데하이드', english: 'Benzaldehyde', color: '#eead78',
-    description: '아몬드 향 · 이 모델에서는 회피 자극', valence: -1,
-  },
-  co2: {
-    name: '이산화탄소', english: 'Carbon dioxide', color: '#90bdf1',
-    description: 'CO₂ · 이 모델에서는 회피 자극', valence: -0.85,
-  },
-}
-
 export const BEHAVIOR_LABELS: Record<Behavior, string> = {
-  exploring: '주변 탐색', tracking: '먹이 추적', feeding: '먹이 섭취',
+  exploring: '주변 탐색', tracking: '유인 자극 추적', feeding: '먹이 섭취',
   avoiding: '위험 회피', resting: '휴식',
 }
 
@@ -62,6 +33,7 @@ export interface FlyState {
   time: number
   hunger: number
   behavior: Behavior
+  /** Normalized local model fields, not physical vapor percentages. */
   concentrations: Record<ChemicalId, number>
   /** Antennal valence signals, normalized to -1…1. */
   leftSignal: number
@@ -80,18 +52,22 @@ const chemicalIds = Object.keys(CHEMICALS) as ChemicalId[]
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 const mix = (a: number, b: number, dt: number, tau: number) => a + (b - a) * (1 - Math.exp(-dt / tau))
 
-/** Relative local concentration; zero for a disabled or empty emitter. */
+/** Relative local odor field; zero for disabled/empty emitters and control liquids. */
 export function concentrationAt(source: ChemicalSource, x: number, y: number): number {
-  if (!source.enabled || !CHEMICALS[source.chemical]) return 0
-  const amount = clamp(finite(source.amount), 0, 100) / 100
+  const strength = sourceStrength(source)
+  if (strength === 0) return 0
   const sigma = clamp(finite(source.spread, 140), 20, 500)
   const dx = finite(x) - finite(source.x, 500)
   const dy = finite(y) - finite(source.y, 350)
-  return amount * Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma))
+  return strength * Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma))
+}
+
+function emptyConcentrations(): Record<ChemicalId, number> {
+  return Object.fromEntries(chemicalIds.map((id) => [id, 0])) as Record<ChemicalId, number>
 }
 
 export function concentrationsAt(sources: ChemicalSource[], x: number, y: number): Record<ChemicalId, number> {
-  const result: Record<ChemicalId, number> = { 'ethyl-acetate': 0, benzaldehyde: 0, co2: 0 }
+  const result = emptyConcentrations()
   for (const source of sources) {
     if (CHEMICALS[source.chemical]) result[source.chemical] += concentrationAt(source, x, y)
   }
@@ -99,11 +75,43 @@ export function concentrationsAt(sources: ChemicalSource[], x: number, y: number
   return result
 }
 
+interface OdorSample {
+  concentrations: Record<ChemicalId, number>
+  attraction: number
+  aversion: number
+  aversiveSignal: number
+  sensory: number
+}
+
+/** Resolve each source's assumed valence before combining same-chemical sources. */
+function odorSampleAt(sources: ChemicalSource[], x: number, y: number): OdorSample {
+  const sample: OdorSample = {
+    concentrations: emptyConcentrations(), attraction: 0, aversion: 0, aversiveSignal: 0, sensory: 0,
+  }
+  for (const source of sources) {
+    const field = concentrationAt(source, x, y)
+    if (field === 0) continue
+    const assumedValence = sourceValence(source)
+    sample.concentrations[source.chemical] += field
+    sample.attraction += field * Math.max(0, assumedValence)
+    sample.aversion += field * Math.max(0, -assumedValence)
+    // Retain the legacy CO2 response gain; new settings are explicitly model assumptions.
+    const avoidanceGain = source.chemical === 'co2' ? 1.15 / 0.85 : 1.4
+    sample.aversiveSignal += field * Math.max(0, -assumedValence) * avoidanceGain
+    sample.sensory += field
+  }
+  for (const id of chemicalIds) sample.concentrations[id] = clamp(sample.concentrations[id], 0, 2)
+  sample.attraction = clamp(sample.attraction, 0, 2)
+  sample.aversion = clamp(sample.aversion, 0, 2)
+  sample.sensory = clamp(sample.sensory)
+  return sample
+}
+
 function initialState(): FlyState {
   return {
     x: 500, y: 350, angle: -0.65, speed: 30, time: 0, hunger: 0.72,
     behavior: 'exploring',
-    concentrations: { 'ethyl-acetate': 0, benzaldehyde: 0, co2: 0 },
+    concentrations: emptyConcentrations(),
     leftSignal: 0, rightSignal: 0,
     activities: { AL_L: 0.02, AL_R: 0.02, LH_L: 0.01, LH_R: 0.01, MB_L: 0.02, MB_R: 0.02, CX: 0.1, DN: 0.15 },
     trail: [{ x: 500, y: 350 }], distance: 0, exposure: 0,
@@ -165,17 +173,18 @@ export class FlySimulation {
     const forwardY = Math.sin(s.angle)
     const antennaX = s.x + forwardX * 14
     const antennaY = s.y + forwardY * 14
-    const left = concentrationsAt(sources, antennaX + forwardY * 10, antennaY - forwardX * 10)
-    const right = concentrationsAt(sources, antennaX - forwardY * 10, antennaY + forwardX * 10)
-    s.concentrations = concentrationsAt(sources, s.x, s.y)
+    const left = odorSampleAt(sources, antennaX + forwardY * 10, antennaY - forwardX * 10)
+    const right = odorSampleAt(sources, antennaX - forwardY * 10, antennaY + forwardX * 10)
+    const body = odorSampleAt(sources, s.x, s.y)
+    s.concentrations = body.concentrations
+    // Only the original food proxy replenishes energy. Being attracted to an
+    // uncalibrated experimental odor does not mean that it is a food source.
     const food = s.concentrations['ethyl-acetate']
-    const aversion = s.concentrations.benzaldehyde + 0.85 * s.concentrations.co2
+    const aversion = body.aversion
     const foodDrive = 0.35 + s.hunger * 0.9
     // Smooth saturation preserves a bilateral gradient in strong odors; a hard
     // clip would blind both antennae at high concentration and defeat avoidance.
-    const valence = (sample: Record<ChemicalId, number>) => Math.tanh(
-      sample['ethyl-acetate'] * foodDrive - sample.benzaldehyde * 1.4 - sample.co2 * 1.15,
-    )
+    const valence = (sample: OdorSample) => Math.tanh(sample.attraction * foodDrive - sample.aversiveSignal)
     const leftValue = valence(left)
     const rightValue = valence(right)
     s.leftSignal = mix(s.leftSignal, leftValue, dt, 0.1)
@@ -191,11 +200,8 @@ export class FlySimulation {
 
     // Antennal lobes: local sensory drive. LH: innate odor relevance. MB:
     // short-lived familiarity/novelty trace (not associative conditioning).
-    const sensory = (sample: Record<ChemicalId, number>) => clamp(
-      sample['ethyl-acetate'] + sample.benzaldehyde + sample.co2,
-    )
-    a.AL_L = mix(a.AL_L, sensory(left), dt, 0.12)
-    a.AL_R = mix(a.AL_R, sensory(right), dt, 0.12)
+    a.AL_L = mix(a.AL_L, left.sensory, dt, 0.12)
+    a.AL_R = mix(a.AL_R, right.sensory, dt, 0.12)
     a.LH_L = mix(a.LH_L, clamp(Math.abs(s.leftSignal) * 1.05 + risk * 0.25), dt, 0.2)
     a.LH_R = mix(a.LH_R, clamp(Math.abs(s.rightSignal) * 1.05 + risk * 0.25), dt, 0.2)
     a.MB_L = mix(a.MB_L, clamp(novelty * 1.5 + a.AL_L * 0.18), dt, 0.7)
@@ -204,7 +210,7 @@ export class FlySimulation {
     if (risk > 0.19) s.behavior = 'avoiding'
     else if (food > 0.68 && s.hunger > 0.13) s.behavior = 'feeding'
     else if (s.hunger < 0.14 && food > 0.4) s.behavior = 'resting'
-    else if (food * foodDrive > 0.075) s.behavior = 'tracking'
+    else if (body.attraction * foodDrive > 0.075) s.behavior = 'tracking'
     else s.behavior = 'exploring'
 
     s.hunger = clamp(s.hunger + (s.behavior === 'feeding' ? -0.027 * food : 0.0015) * dt)
@@ -263,7 +269,7 @@ export class FlySimulation {
       s.angle = wrap(-s.angle)
     }
     s.distance += Math.hypot(s.x - oldX, s.y - oldY)
-    s.exposure += (food + aversion) * dt
+    s.exposure += Object.values(s.concentrations).reduce((sum, value) => sum + value, 0) * dt
     s.time += dt
     this.trailClock += dt
     if (this.trailClock >= 0.12) {

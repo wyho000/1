@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, ArrowDownToLine, ArrowUpRight, Beaker, ChevronDown, CircleHelp, Clock3, Dna, Eye, FlaskConical, Focus, Layers3, Leaf, MapPin, Microscope, Pause, Play, Plus, Radio, RotateCcw, Route, Settings2, Sparkles, Wind, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, ArrowUpRight, Beaker, ChevronDown, CircleHelp, Clock3, Dna, Droplets, Eye, FlaskConical, Focus, Layers3, Leaf, MapPin, Microscope, Pause, Play, Plus, Radio, RotateCcw, Route, Settings2, Sparkles, Trash2, Wind, X } from 'lucide-react';
 import { FlySimulation } from './simulation';
 import type { ChemicalSource } from './simulation';
+import { CHEMICALS, CHEMICAL_PRESETS, createSourceFromPreset, sourceLabel, sourceStrength, sourceValence } from './chemicals';
+import type { ChemicalId } from './chemicals';
 import BrainMap from './components/BrainMap';
 import WorldCanvas from './components/WorldCanvas';
 
@@ -9,14 +11,16 @@ const initialSources = (): ChemicalSource[] => [
   { id: 'source-1', chemical: 'ethyl-acetate', x: 735, y: 225, amount: 72, spread: 220, enabled: true },
   { id: 'source-2', chemical: 'benzaldehyde', x: 245, y: 485, amount: 48, spread: 170, enabled: true },
 ];
-const chemicalUI = {
-  'ethyl-acetate': { name: '에틸 아세테이트', en: 'Ethyl acetate', role: '먹이 유인', color: '#a7dfb1', icon: Leaf },
-  benzaldehyde: { name: '벤즈알데하이드', en: 'Benzaldehyde', role: '회피 자극', color: '#eead78', icon: Beaker },
-  co2: { name: '이산화탄소', en: 'Carbon dioxide', role: '회피 자극', color: '#90bdf1', icon: Wind },
+const MAX_SOURCES = 16;
+const chemicalIcons: Record<ChemicalId, typeof Leaf> = {
+  'ethyl-acetate': Leaf, benzaldehyde: Beaker, co2: Wind,
+  '2-phenylethanol': FlaskConical, ethanol: Beaker, 'acetic-acid': FlaskConical,
+  dw: Droplets, pbs: Droplets,
 };
+const responseLabel = (source: ChemicalSource) => CHEMICALS[source.chemical].isControl ? '후각 입력 없는 대조군' : sourceValence(source) > 0 ? '유인 가정' : sourceValence(source) < 0 ? '회피 가정' : '방향 선호 없음';
 const behaviors = {
   exploring: { title: '주변을 탐색하는 중', short: '자율 탐색', desc: '감각 신호를 비교하며 새로운 경로를 찾고 있어요.', color: '#c3b5ee' },
-  tracking: { title: '먹이 냄새를 추적하는 중', short: '냄새 추적', desc: '더듬이가 감지한 농도 변화에 따라 방향을 바꿉니다.', color: '#a7dfb1' },
+  tracking: { title: '유인 냄새를 추적하는 중', short: '냄새 추적', desc: '더듬이가 감지한 농도 변화에 따라 방향을 바꿉니다.', color: '#a7dfb1' },
   avoiding: { title: '불쾌한 자극을 피하는 중', short: '자극 회피', desc: '회피 신호가 이동 방향과 속도를 바꾸고 있어요.', color: '#eead78' },
   feeding: { title: '먹이 근처에 머무르는 중', short: '섭식 행동', desc: '먹이 자극이 충분해 이동을 줄이고 허기를 채웁니다.', color: '#a7dfb1' },
   resting: { title: '잠시 쉬어가는 중', short: '휴식', desc: '내부 에너지 상태에 따라 활동을 조절합니다.', color: '#90bdf1' },
@@ -39,7 +43,7 @@ export default function App() {
   const [speed, setSpeed] = useState(1);
   const [showField, setShowField] = useState(true);
   const [showTrail, setShowTrail] = useState(true);
-  const [newChemical, setNewChemical] = useState<ChemicalSource['chemical']>('co2');
+  const [newPreset, setNewPreset] = useState('2-phenylethanol-0.01');
   const [history, setHistory] = useState<number[]>(Array(90).fill(0));
   const [events, setEvents] = useState([{ time: 0, behavior: 'exploring' as keyof typeof behaviors }]);
   const [toast, setToast] = useState('');
@@ -77,7 +81,9 @@ export default function App() {
 
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 3500); return () => clearTimeout(timer); }, [toast]);
   const selected = sources.find(s => s.id === selectedId) ?? sources[0];
-  const selectedMeta = chemicalUI[selected.chemical];
+  const selectedMeta = CHEMICALS[selected.chemical];
+  const selectedDoses = CHEMICAL_PRESETS.filter(preset => preset.chemical === selected.chemical && preset.solutionConcentration !== undefined);
+  const selectedValence = sourceValence(selected);
   const currentBehavior = behaviors[state.behavior];
   const distance = Math.hypot(selected.x - state.x, selected.y - state.y);
   const updateSource = (patch: Partial<ChemicalSource>) => setSources(prev => prev.map(s => s.id === selected.id ? { ...s, ...patch } : s));
@@ -87,10 +93,16 @@ export default function App() {
     updateSource({ x: clamp(state.x + Math.cos(angle) * value, 30, 970), y: clamp(state.y + Math.sin(angle) * value, 30, 670) });
   };
   const addSource = () => {
-    if (sources.length >= 6) return;
+    if (sources.length >= MAX_SOURCES) return;
     const id = `source-${nextId.current++}`;
-    setSources(prev => [...prev, { id, chemical: newChemical, x: 500 + Math.cos(prev.length * 2) * 230, y: 350 + Math.sin(prev.length * 2) * 200, amount: 55, spread: 190, enabled: true }]);
+    setSources(prev => [...prev, createSourceFromPreset(newPreset, id, 500 + Math.cos(prev.length * 2) * 230, 350 + Math.sin(prev.length * 2) * 200)]);
     setSelectedId(id);
+  };
+  const removeSelected = () => {
+    if (sources.length <= 1) return;
+    const remaining = sources.filter(source => source.id !== selected.id);
+    setSources(remaining);
+    setSelectedId(remaining[0].id);
   };
   const reset = () => {
     engine.current.reset(42);
@@ -103,7 +115,9 @@ export default function App() {
     setToast('실험을 초기 상태로 되돌렸습니다.');
   };
   const exportExperiment = () => {
-    const payload = { application: 'Flywire Lab', exportedAt: new Date().toISOString(), seed: 42, model: 'Phenomenological autonomous behavior; not a whole-brain emulation', anatomy: 'FlyWire female FAFB v783 / annotations v2.0.0', time: state.time, sources, state, events };
+    const payload = { application: 'Flywire Lab', schemaVersion: 2, exportedAt: new Date().toISOString(), seed: 42, model: 'Phenomenological autonomous behavior; not a whole-brain emulation', anatomy: 'FlyWire female FAFB v783 / annotations v2.0.0', time: state.time, sources, state, events,
+      chemicalModel: { concentrationMeaning: 'Nominal solution percent; basis recorded separately. Not calibrated gas-phase concentration.', doseScaling: 'Within each organic chemical, amount/100 multiplied by nominal percent divided by reference percent. Cross-chemical sensitivity is not calibrated.', controls: 'DW and 1x PBS have zero olfactory drive; humidity, taste, pH and contact effects are not modeled.', sources: sources.map(source => ({ id: source.id, label: sourceLabel(source), concentrationBasis: source.concentrationBasis ?? 'unspecified', referenceConcentration: CHEMICALS[source.chemical].referenceConcentration ?? null, relativeStrength: sourceStrength(source), responseValence: sourceValence(source), isControl: CHEMICALS[source.chemical].isControl })) },
+    };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = `flywire-experiment-${Math.floor(state.time)}s.json`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -129,16 +143,25 @@ export default function App() {
           <div className="environment-body">
             <div className="label-row"><h3>화학물질</h3><span>{sources.length}개 배치됨</span></div>
             <div className="source-list">{sources.map((source, index) => {
-              const meta = chemicalUI[source.chemical], Icon = meta.icon;
+              const meta = CHEMICALS[source.chemical], Icon = chemicalIcons[source.chemical];
               return <div key={source.id} className={`source-row ${source.id === selected.id ? 'is-selected' : ''} ${!source.enabled ? 'is-disabled' : ''}`} style={{ '--source-color': meta.color } as React.CSSProperties}>
-                <button className="source-select" onClick={() => setSelectedId(source.id)} aria-pressed={source.id === selected.id}><span className="source-icon"><Icon size={17}/></span><span><strong>{meta.name}</strong><small>{meta.role} <b>·</b> {String.fromCharCode(65 + index)}</small></span></button>
-                <button className={`source-switch ${source.enabled ? 'on' : ''}`} role="switch" aria-checked={source.enabled} aria-label={`${String.fromCharCode(65 + index)} ${meta.name} 활성화`} onClick={() => setSources(prev => prev.map(s => s.id === source.id ? { ...s, enabled: !s.enabled } : s))}><span/></button>
+                <button className="source-select" onClick={() => setSelectedId(source.id)} aria-pressed={source.id === selected.id}><span className="source-icon"><Icon size={17}/></span><span><strong>{sourceLabel(source)}</strong><small>{responseLabel(source)} <b>·</b> {String.fromCharCode(65 + index)}</small></span></button>
+                <button className={`source-switch ${source.enabled ? 'on' : ''}`} role="switch" aria-checked={source.enabled} aria-label={`${String.fromCharCode(65 + index)} ${sourceLabel(source)} 활성화`} onClick={() => setSources(prev => prev.map(s => s.id === source.id ? { ...s, enabled: !s.enabled } : s))}><span/></button>
               </div>;
             })}</div>
-            <div className="add-source-row"><div className="select-wrap"><select aria-label="추가할 화학물질" value={newChemical} onChange={e => setNewChemical(e.target.value as ChemicalSource['chemical'])}>{Object.entries(chemicalUI).map(([key, item]) => <option key={key} value={key}>{item.name}</option>)}</select><ChevronDown size={13}/></div><button className="add-source" onClick={addSource} disabled={sources.length >= 6} aria-label="화학물질 추가" title="최대 6개까지 추가"><Plus size={17}/></button></div>
+            <div className="add-source-row"><div className="select-wrap"><select aria-label="추가할 화학물질" value={newPreset} onChange={e => setNewPreset(e.target.value)}>{Object.entries(CHEMICALS).map(([id, meta]) => <optgroup key={id} label={meta.name}>{CHEMICAL_PRESETS.filter(preset => preset.chemical === id).map(preset => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</optgroup>)}</select><ChevronDown size={13}/></div><button className="add-source" onClick={addSource} disabled={sources.length >= MAX_SOURCES} aria-label="화학물질 추가" title={`최대 ${MAX_SOURCES}개까지 추가`}><Plus size={17}/></button></div>
+            <p className="preset-hint">용액 농도를 선택한 뒤 +로 배치하세요. 최대 {MAX_SOURCES}개.</p>
             <div className="control-divider"/>
-            <div className="selected-label"><span style={{ background: selectedMeta.color }}/><h3>{selectedMeta.name}</h3><span className="selected-letter">{String.fromCharCode(65 + sources.findIndex(s => s.id === selected.id))}</span></div>
-            <div className="range-control"><div className="range-label"><label htmlFor="amount">방출량</label><span>{selected.amount}<small> a.u.</small></span></div><input id="amount" type="range" min="0" max="100" step="1" value={selected.amount} onChange={e => updateSource({ amount: Number(e.target.value) })} style={{ '--range-progress': `${selected.amount}%` } as React.CSSProperties}/><div className="range-ends"><span>없음</span><span>높음</span></div></div>
+            <div className="selected-label"><span style={{ background: selectedMeta.color }}/><h3>{sourceLabel(selected)}</h3><span className="selected-letter">{String.fromCharCode(65 + sources.findIndex(s => s.id === selected.id))}</span><button className="remove-source icon-button" aria-label="선택한 물질 삭제" title={sources.length <= 1 ? '발생원 하나는 남겨 둡니다. 스위치로 끌 수 있어요.' : '선택한 발생원 삭제'} disabled={sources.length <= 1} onClick={removeSelected}><Trash2 size={13}/></button></div>
+            {selectedDoses.length > 0 && <div className="condition-panel">
+              <div className="condition-title"><FlaskConical size={13}/><span>용액 조건</span><small>모델 가정</small></div>
+              <label className="condition-field" htmlFor="solution-concentration"><span>용액 농도</span><select id="solution-concentration" value={selected.solutionConcentration ?? selectedMeta.referenceConcentration} onChange={e => updateSource({ solutionConcentration: Number(e.target.value) })}>{selectedDoses.map(preset => <option key={preset.id} value={preset.solutionConcentration}>{preset.solutionConcentration}%</option>)}</select></label>
+              <label className="condition-field" htmlFor="concentration-basis"><span>% 기준</span><select id="concentration-basis" value={selected.concentrationBasis ?? 'unspecified'} onChange={e => updateSource({ concentrationBasis: e.target.value as ChemicalSource['concentrationBasis'] })}><option value="unspecified">미지정</option><option value="v/v">v/v · 부피비</option><option value="w/v">w/v · 질량/부피</option></select></label>
+              <div className="range-control valence-control"><div className="range-label"><label htmlFor="response-valence">가정한 반응</label><span>{selectedValence > 0 ? '유인' : selectedValence < 0 ? '회피' : '중립'} {Math.abs(selectedValence).toFixed(2)}</span></div><input id="response-valence" type="range" min="-1" max="1" step="0.05" value={selectedValence} onChange={e => updateSource({ responseValence: Number(e.target.value) })} style={{ '--range-progress': `${(selectedValence + 1) * 50}%` } as React.CSSProperties}/><div className="range-ends"><span>회피 −1</span><span>중립 0</span><span>유인 +1</span></div></div>
+              <p>용액 %는 공기 중 농도가 아닙니다. 반응은 검증되지 않은 가정값이며, % 기준은 기록만 합니다.</p>
+            </div>}
+            {selectedMeta.isControl && <div className="control-notice"><Droplets size={15}/><p><strong>{sourceLabel(selected)} · 대조군</strong>이 모델에서는 후각 자극이 0입니다. 습도·맛·접촉·pH 효과는 계산하지 않습니다.</p></div>}
+            <div className="range-control"><div className="range-label"><label htmlFor="amount">{selectedMeta.isControl ? '배치량 (후각 효과 없음)' : '방출량'}</label><span>{selected.amount}<small> a.u.</small></span></div><input id="amount" type="range" min="0" max="100" step="1" value={selected.amount} onChange={e => updateSource({ amount: Number(e.target.value) })} style={{ '--range-progress': `${selected.amount}%` } as React.CSSProperties}/><div className="range-ends"><span>없음</span><span>높음</span></div></div>
             <div className="range-control"><div className="range-label"><label htmlFor="distance">초파리와의 거리</label><span>{(distance / 10).toFixed(1)}<small> mm</small></span></div><input id="distance" type="range" min="0" max="1100" step="5" value={distance} onChange={e => setDistance(Number(e.target.value))} style={{ '--range-progress': `${distance / 11}%` } as React.CSSProperties}/><div className="range-ends"><span>가까이</span><span>멀리</span></div></div>
             <div className="range-control"><div className="range-label"><label htmlFor="spread">확산 범위</label><span>{(selected.spread / 10).toFixed(0)}<small> mm</small></span></div><input id="spread" type="range" min="60" max="350" step="10" value={selected.spread} onChange={e => updateSource({ spread: Number(e.target.value) })} style={{ '--range-progress': `${(selected.spread - 60) / 2.9}%` } as React.CSSProperties}/><div className="range-ends"><span>좁게</span><span>넓게</span></div></div>
             <div className="position-inputs"><label>X <input aria-label="화학물질 X 위치 (mm)" type="number" min="3" max="97" step="1" value={+(selected.x / 10).toFixed(1)} onChange={e => updateSource({ x: clamp(Number(e.target.value) * 10, 30, 970) })}/></label><label>Y <input aria-label="화학물질 Y 위치 (mm)" type="number" min="3" max="67" step="1" value={+(selected.y / 10).toFixed(1)} onChange={e => updateSource({ y: clamp(Number(e.target.value) * 10, 30, 670) })}/></label><span>mm</span></div>
@@ -169,6 +192,6 @@ export default function App() {
       <footer className="page-footer"><span><span className="footer-dot"/> 실제 해부학 데이터, 탐구를 위한 시뮬레이션</span><button onClick={() => dialogRef.current?.showModal()}>데이터와 모델 알아보기 <ArrowUpRight size={13}/></button><span className="footer-version">FLYWIRE LAB <b>/</b> EXPERIMENT 001</span></footer>
     </main>
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
-    <dialog ref={dialogRef} className="info-dialog" onClick={e => { if (e.target === e.currentTarget) dialogRef.current?.close(); }}><button className="dialog-close icon-button" aria-label="안내 닫기" onClick={() => dialogRef.current?.close()}><X size={20}/></button><div className="dialog-icon"><Dna size={28}/></div><div className="eyebrow">THE SCIENCE BEHIND THE SIMULATION</div><h2>작은 뇌를 들여다보는 방법</h2><p>실제 암컷 초파리 뇌의 해부학 정보와 단순화한 감각·행동 모델을 연결한 가상 실험실입니다.</p><div className="info-section"><h3><Eye size={17}/> 실제 데이터</h3><p>FlyWire의 성체 암컷 FAFB 뇌 지도(v783)와 공개 뉴런 주석(v2.0.0)을 사용합니다. 뇌 지도의 점은 실제 뉴런 위치를 표본 추출해 투영한 것입니다. 전체 주석 데이터는 139,255개 뉴런을 포함합니다.</p></div><div className="info-section"><h3><Activity size={17}/> 모델로 계산하는 것</h3><p>양쪽 더듬이의 농도 감지 → 후각 처리 → 허기·습관화·짧은 감각 기억 → 방향 및 속도 결정이 연속적으로 일어납니다. 위치를 아는 목표 추적 명령이나 사용자 조종 없이 감각 신호로 이동합니다. 화학물질은 거리별 가우시안 농도장으로 근사하며 방출량은 상대 단위(a.u.)입니다. 공간의 mm는 가상 환산 척도입니다.</p><p>영역별 활성도와 연결선은 설명을 위한 모델 출력이며, 측정된 신경 발화나 실제 시냅스 가중치가 아닙니다. 전뇌 시뮬레이션, 의식, 실제 사고의 재현을 의미하지 않습니다. 표시한 세 물질의 유인·회피 성향도 이 모델의 가정입니다.</p></div><div className="info-section"><h3><FlaskConical size={17}/> 간단한 실험</h3><ol><li>초록색 먹이 자극의 방출량을 바꾸며 추적 행동을 관찰하세요.</li><li>주황색 회피 물질을 초파리 가까이 이동해 보세요.</li><li>물질을 모두 끄면 외부 자극 없이 주변을 탐색합니다.</li></ol></div><a className="source-link" href="https://github.com/flyconnectome/flywire_annotations/tree/v2.0.0" target="_blank" rel="noreferrer">FlyWire 원본 데이터 및 출처 <ArrowUpRight size={15}/></a><a className="source-link" href="/data/flywire-brain.json" target="_blank" rel="noreferrer">이 앱의 해부학 표본 데이터 <ArrowUpRight size={15}/></a></dialog>
+    <dialog ref={dialogRef} className="info-dialog" onClick={e => { if (e.target === e.currentTarget) dialogRef.current?.close(); }}><button className="dialog-close icon-button" aria-label="안내 닫기" onClick={() => dialogRef.current?.close()}><X size={20}/></button><div className="dialog-icon"><Dna size={28}/></div><div className="eyebrow">THE SCIENCE BEHIND THE SIMULATION</div><h2>작은 뇌를 들여다보는 방법</h2><p>실제 암컷 초파리 뇌의 해부학 정보와 단순화한 감각·행동 모델을 연결한 가상 실험실입니다.</p><div className="info-section"><h3><Eye size={17}/> 실제 데이터</h3><p>FlyWire의 성체 암컷 FAFB 뇌 지도(v783)와 공개 뉴런 주석(v2.0.0)을 사용합니다. 뇌 지도의 점은 실제 뉴런 위치를 표본 추출해 투영한 것입니다. 전체 주석 데이터는 139,255개 뉴런을 포함합니다.</p></div><div className="info-section"><h3><Activity size={17}/> 모델로 계산하는 것</h3><p>양쪽 더듬이의 농도 감지 → 후각 처리 → 허기·습관화·짧은 감각 기억 → 방향 및 속도 결정이 연속적으로 일어납니다. 위치를 아는 목표 추적 명령이나 사용자 조종 없이 감각 신호로 이동합니다. 화학물질은 거리별 가우시안 농도장으로 근사하며 방출량은 상대 단위(a.u.)입니다. 공간의 mm는 가상 환산 척도입니다.</p><p>영역별 활성도와 연결선은 설명을 위한 모델 출력이며, 측정된 신경 발화나 실제 시냅스 가중치가 아닙니다. 전뇌 시뮬레이션, 의식, 실제 사고의 재현을 의미하지 않습니다. 각 물질의 유인·회피 성향도 이 모델의 가정입니다. 2-페닐에탄올·에탄올·아세트산의 반응 방향과 강도는 화면에서 바꿀 수 있습니다.</p></div><div className="info-section"><h3><Droplets size={17}/> 용액 농도와 대조군</h3><p>2-페닐에탄올 0.01·0.05·0.1%, 에탄올 1·5·10%, 아세트산 0.1·0.5·1%, DW, 1× PBS를 제공합니다. %는 명목 용액 농도입니다. 부피비(v/v)인지 질량/부피(w/v)인지는 처음에 미지정이며, 선택해 기록할 수 있지만 서로 환산하지 않습니다. 1× PBS는 완충액 배수이며 1%가 아닙니다.</p><p>용액 농도는 각 물질의 최대 기본 농도(0.1%, 10%, 1%)에 대한 상대 자극 배율로 사용합니다. 실제 휘발성·온도·용매·습도·수용체 민감도는 보정하지 않았으므로 물질 간 실제 반응 세기를 비교하는 실험 예측값이 아닙니다. DW와 PBS는 후각 입력이 없는 대조군으로 처리하고 물질 표시는 유지합니다. 세 용액에 접근해도 영양 섭취로 처리하지 않습니다.</p></div><div className="info-section"><h3><FlaskConical size={17}/> 간단한 실험</h3><ol><li>초록색 먹이 자극의 방출량을 바꾸며 추적 행동을 관찰하세요.</li><li>주황색 회피 물질을 초파리 가까이 이동해 보세요.</li><li>물질을 모두 끄면 외부 자극 없이 주변을 탐색합니다.</li></ol></div><a className="source-link" href="https://github.com/flyconnectome/flywire_annotations/tree/v2.0.0" target="_blank" rel="noreferrer">FlyWire 원본 데이터 및 출처 <ArrowUpRight size={15}/></a><a className="source-link" href="/data/flywire-brain.json" target="_blank" rel="noreferrer">이 앱의 해부학 표본 데이터 <ArrowUpRight size={15}/></a></dialog>
   </div>;
 }
