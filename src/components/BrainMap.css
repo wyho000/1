@@ -1,0 +1,42 @@
+.brain-panel{color:#d8e5e3;background:#11191e;border:1px solid #253137;border-radius:15px;overflow:hidden;min-width:0;font-family:inherit}
+.brain-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:19px 19px 0}
+.brain-eyebrow{font-size:9px;letter-spacing:1.65px;color:#71868c;font-weight:600;line-height:1.4}
+.brain-header h2{font-size:16px;letter-spacing:-.5px;font-weight:600;line-height:1.6;margin:5px 0 0;display:flex;align-items:center;gap:8px}
+.brain-help{width:13px;height:13px;display:inline-flex;justify-content:center;align-items:center;border:1px solid #506068;border-radius:50%;font:9px Georgia,serif;color:#8da0a5;cursor:help}
+.brain-live{align-self:flex-start;margin-top:6px;display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:600;letter-spacing:.8px;color:#71cfa8;background:#173128;border:1px solid #254237;border-radius:4px;padding:4px 6px}
+.brain-live i{width:4px;height:4px;border-radius:50%;background:#70dcaa;box-shadow:0 0 6px #64dfaa70;animation:brain-live-pulse 2.4s ease-in-out infinite}
+.brain-live-paused{color:#95a6ae;border-color:#35424b;background:#202c34}
+.brain-live-paused i{background:#95a6ae;box-shadow:none;animation:none}
+.brain-map-wrap{margin-top:15px;background:radial-gradient(ellipse at 50% 48%,#172c2d55,transparent 66%)}
+.brain-map-caption{display:flex;justify-content:space-between;margin:0 19px;color:#637a80;font-size:8px;letter-spacing:.8px}
+.brain-map-caption span:last-child{letter-spacing:0;font-size:9px}
+.brain-map{display:block;width:100%;height:auto;max-height:229px;overflow:visible}
+.brain-direction{fill:#61767c;font:8px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:1px;text-anchor:middle}
+.brain-optic-label{fill:#4f6870;font-size:8px;text-anchor:middle}
+.brain-region{cursor:pointer;outline:none}
+.brain-region:focus-visible>ellipse{stroke:#fff;stroke-width:2}
+.brain-region-label{font:8px ui-monospace,SFMono-Regular,Consolas,monospace;text-anchor:middle;letter-spacing:.5px;pointer-events:none}
+.brain-region>ellipse,.brain-region>circle{transition:fill-opacity .18s,stroke-opacity .18s,opacity .18s}
+.brain-signal-path{animation:brain-path-signal 2s linear infinite}
+.brain-paused .brain-signal-path{animation-play-state:paused}
+.brain-map-scale{display:flex;align-items:center;justify-content:center;gap:7px;color:#62777c;font-size:8px;margin-top:-5px;margin-bottom:14px}
+.brain-scale-track{height:3px;width:62px;border-radius:2px;background:linear-gradient(90deg,#224138,#54c89b,#d0ffe2)}
+.brain-scale-unit{margin-left:6px;color:#53666d}
+.brain-selected{margin:0 17px 14px;background:#19232a;border:1px solid #23343b;border-left:2px solid;border-radius:6px;padding:10px 11px 9px}
+.brain-selected-top{display:flex;align-items:center;justify-content:space-between;gap:7px;line-height:1.5}
+.brain-selected-top>span{font-size:11px;font-weight:500;color:#c3d0d3}
+.brain-selected-top>span>small{font:8px ui-monospace,SFMono-Regular,Consolas,monospace;margin-left:7px;color:#73878e}
+.brain-selected-top strong{font:500 17px ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
+.brain-selected-top strong small{font-size:9px;margin-left:2px}
+.brain-selected p{font-size:9px;color:#7f959e;line-height:1.65;letter-spacing:-.1px;margin:3px 0 0}
+.brain-meters{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:0 18px 15px}
+.brain-meter>div{display:flex;align-items:center;justify-content:space-between;font-size:9px;color:#8ca0a7;gap:4px;margin-bottom:7px}
+.brain-meter>div>span:last-child{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a6b7bd;font-size:9px}
+.brain-meter-track{display:block;height:3px;border-radius:3px;background:#253239;overflow:hidden}
+.brain-meter-track>span{display:block;height:100%;border-radius:3px;transition:width .2s ease}
+.brain-footnote{display:flex;align-items:center;gap:6px;border-top:1px solid #233037;padding:10px 18px;font-size:9px;color:#637c86;background:#0d151920}
+.brain-most-active-dot{width:4px;height:4px;border-radius:50%;opacity:.8}
+.brain-footnote strong{font:9px ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:500;color:#9eb4bd;margin-left:auto}
+@keyframes brain-path-signal{to{stroke-dashoffset:-34}}
+@keyframes brain-live-pulse{50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){.brain-signal-path,.brain-live i{animation:none}.brain-region>ellipse,.brain-region>circle,.brain-meter-track>span{transition:none}}
