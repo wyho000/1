@@ -16,6 +16,8 @@ export type { ChemicalId, ChemicalSource } from './chemicals.ts'
 
 export const ARENA_WIDTH = 1000
 export const ARENA_HEIGHT = 700
+/** Version 2 samples the initial heading and turn tendency from the trial seed. */
+export const BEHAVIOR_MODEL_VERSION = 2
 
 export type Behavior = 'exploring' | 'tracking' | 'feeding' | 'avoiding' | 'resting'
 export type RegionId = 'AL_L' | 'AL_R' | 'LH_L' | 'LH_R' | 'MB_L' | 'MB_R' | 'CX' | 'DN'
@@ -107,9 +109,9 @@ function odorSampleAt(sources: ChemicalSource[], x: number, y: number): OdorSamp
   return sample
 }
 
-function initialState(): FlyState {
+function initialState(angle: number): FlyState {
   return {
-    x: 500, y: 350, angle: -0.65, speed: 30, time: 0, hunger: 0.72,
+    x: 500, y: 350, angle, speed: 30, time: 0, hunger: 0.72,
     behavior: 'exploring',
     concentrations: emptyConcentrations(),
     leftSignal: 0, rightSignal: 0,
@@ -119,32 +121,46 @@ function initialState(): FlyState {
 }
 
 export class FlySimulation {
-  public state: FlyState = initialState()
+  public state: FlyState
   private seed: number
   private rng: number
+  private initialAngle = 0
   private accumulator = 0
   private wander = 0
   private memory = 0
   private previousValence = 0
   private cxSteering = 0
-  private turnBias = 1
+  private turnBias = 0
   private trailClock = 0
 
   constructor(seed = 42) {
     this.seed = seed >>> 0
     this.rng = this.seed
+    this.state = this.createInitialState()
+  }
+
+  get initialConditions(): { seed: number; angle: number } {
+    return { seed: this.seed, angle: this.initialAngle }
+  }
+
+  private createInitialState(): FlyState {
+    // Sample the full circle independently of chemical placement. A fixed
+    // rightward heading makes even symmetric attractants favor the right side.
+    // Seed these choices along with exploratory noise so a trial can be replayed.
+    this.initialAngle = this.random() * TAU - Math.PI
+    this.turnBias = this.random() < 0.5 ? -1 : 1
+    return initialState(this.initialAngle)
   }
 
   reset(seed = this.seed): void {
     this.seed = seed >>> 0
     this.rng = this.seed
-    this.state = initialState()
+    this.state = this.createInitialState()
     this.accumulator = 0
     this.wander = 0
     this.memory = 0
     this.previousValence = 0
     this.cxSteering = 0
-    this.turnBias = 1
     this.trailClock = 0
   }
 

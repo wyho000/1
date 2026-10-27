@@ -5,6 +5,7 @@ Start npm run dev first. Requires Python Playwright and Chromium.
 Optional: FLYWIRE_BASE_URL and FLYWIRE_CHROMIUM_PATH.
 """
 import json
+import math
 import os
 from pathlib import Path
 
@@ -36,6 +37,12 @@ def range_steps(page, selector, steps):
 
 def assert_fresh_fly(record):
     state = record["state"]
+    assert record["behaviorModelVersion"] == 2
+    assert isinstance(record["seed"], int) and 0 <= record["seed"] <= 0xFFFFFFFF
+    assert record["initialConditions"]["seed"] == record["seed"]
+    assert math.isfinite(record["initialConditions"]["angle"])
+    assert abs(record["initialConditions"]["angle"]) <= 2 * math.pi
+    assert state["angle"] == record["initialConditions"]["angle"]
     assert state["x"] == 500 and state["y"] == 350, "Fly did not reset to arena center"
     assert state["time"] == 0 and record["time"] == 0
     assert state["hunger"] == 0.72
@@ -101,6 +108,7 @@ def main():
         page.get_by_role("button", name="초파리만 초기화", exact=True).click()
         after = exported(page)
         assert_fresh_fly(after)
+        assert after["seed"] != before["seed"], "Fly-only reset reused the previous trial seed"
         assert after["sources"] == before["sources"], "Fly-only reset changed a chemical setting"
         assert after["chemicalModel"] == before["chemicalModel"]
         expect(page.get_by_test_id("simulation-time")).to_have_text("00:00")
@@ -122,10 +130,14 @@ def main():
         page.wait_for_timeout(800)
         repeated = exported(page)
         assert_fresh_fly(repeated)
-        assert repeated["state"] == after["state"]
+        assert repeated["seed"] != after["seed"]
+        assert repeated["initialConditions"]["angle"] != after["initialConditions"]["angle"]
+        assert {key: value for key, value in repeated["state"].items() if key != "angle"} == {
+            key: value for key, value in after["state"].items() if key != "angle"
+        }, "A new heading must not preserve stale internal state"
         assert repeated["sources"] == before["sources"]
         expect(page.locator(".event-row")).to_have_count(1)
-        checks.append("repeated paused resets remain stable without stale duplicate behavior events")
+        checks.append("repeated paused resets choose a new seed and heading, with fresh state and one behavior event")
 
         page.get_by_role("button", name="화학물질 추가", exact=True).click()
         added = exported(page)
@@ -146,6 +158,7 @@ def main():
         page.get_by_role("button", name="시뮬레이션 일시정지").click()
         running_after = exported(page)
         assert 0 < running_after["time"] < running_before["time"]
+        assert running_after["seed"] != running_before["seed"]
         assert running_after["sources"] == running_before["sources"]
         expect(page.get_by_role("button", name="2×", exact=True)).to_have_attribute("aria-pressed", "true")
         checks.append("reset during playback keeps the simulation running with the same environment and speed")
@@ -154,6 +167,7 @@ def main():
         page.get_by_role("button", name="실험 초기화", exact=True).click()
         complete = exported(page)
         assert_fresh_fly(complete)
+        assert complete["seed"] != running_after["seed"]
         assert len(complete["sources"]) == 2
         assert complete["sources"][0]["id"] == "source-1" and complete["sources"][0]["amount"] == 72
         assert complete["sources"][1]["chemical"] == "benzaldehyde"
@@ -175,8 +189,12 @@ def main():
         fly_button.click()
         mobile_after = exported(mobile)
         assert_fresh_fly(mobile_after)
+        assert mobile_after["seed"] != mobile_before["seed"]
         assert mobile_after["sources"] == mobile_before["sources"]
         assert not mobile.evaluate("document.documentElement.scrollWidth > innerWidth"), "Mobile horizontal overflow"
+        expect(mobile.locator(".toast")).not_to_be_visible(timeout=5000)
+        expect(mobile.locator(".reset-hint")).to_be_visible()
+        mobile.locator(".reset-actions").screenshot(path=str(OUTPUT / "reset-mobile-toolbar.png"))
         mobile.screenshot(path=str(OUTPUT / "reset-mobile.png"), full_page=True)
         checks.append("390px mobile layout exposes both reset actions and preserves placed sources")
         assert not errors, f"Browser runtime errors: {errors}"

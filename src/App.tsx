@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowDownToLine, ArrowUpRight, Beaker, ChevronDown, CircleHelp, Clock3, Dna, Droplets, Eye, FlaskConical, Focus, Layers3, Leaf, MapPin, Microscope, Pause, Play, Plus, Radio, RotateCcw, Route, Settings2, Sparkles, Trash2, Wind, X } from 'lucide-react';
-import { FlySimulation } from './simulation';
+import { BEHAVIOR_MODEL_VERSION, FlySimulation } from './simulation';
 import type { ChemicalSource } from './simulation';
 import { CHEMICALS, CHEMICAL_PRESETS, createSourceFromPreset, sourceLabel, sourceStrength, sourceValence } from './chemicals';
 import type { ChemicalId } from './chemicals';
@@ -29,14 +29,22 @@ const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().p
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const snapshot = (sim: FlySimulation) => ({ ...sim.state, activities: { ...sim.state.activities }, concentrations: { ...sim.state.concentrations }, trail: [...sim.state.trail] });
 
+// A new trial varies both its heading and exploratory motion. The engine keeps
+// that trial reproducible from its exported seed and behavior-model version.
+function newTrialSeed(previousSeed?: number): number {
+  const value = new Uint32Array(1);
+  do { crypto.getRandomValues(value); } while (value[0] === previousSeed);
+  return value[0];
+}
+
 function Sparkline({ values, color }: { values: number[]; color: string }) {
   const points = values.map((v, i) => `${i * 270 / Math.max(1, values.length - 1)},${48 - clamp(v, 0, 1) * 40}`).join(' ');
   return <svg className="sparkline" viewBox="0 0 270 54" preserveAspectRatio="none" aria-label="최근 더듬이 감각 신호 변화" role="img"><path d="M0 14H270M0 34H270M0 53H270" stroke="#ffffff0a" strokeDasharray="3 5"/><polyline points={points} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" /></svg>;
 }
 
 export default function App() {
-  const engine = useRef(new FlySimulation(42));
-  const [state, setState] = useState(() => snapshot(engine.current));
+  const [engine] = useState(() => new FlySimulation(newTrialSeed()));
+  const [state, setState] = useState(() => snapshot(engine));
   const [sources, setSources] = useState<ChemicalSource[]>(initialSources);
   const [selectedId, setSelectedId] = useState('source-1');
   const [running, setRunning] = useState(true);
@@ -51,18 +59,18 @@ export default function App() {
   const options = useRef({ sources, running, speed });
   options.current = { sources, running, speed };
   const nextId = useRef(3);
-  const previousBehavior = useRef(engine.current.state.behavior);
+  const previousBehavior = useRef(engine.state.behavior);
 
   useEffect(() => {
     let frame = 0, last = 0, rendered = 0, sampled = 0;
     const tick = (now: number) => {
       if (last && options.current.running) {
-        engine.current.step(Math.min((now - last) / 1000, 0.06) * options.current.speed, options.current.sources);
+        engine.step(Math.min((now - last) / 1000, 0.06) * options.current.speed, options.current.sources);
       }
       last = now;
       if (now - rendered > 1000 / 30) {
-        const current = engine.current.state;
-        setState(snapshot(engine.current));
+        const current = engine.state;
+        setState(snapshot(engine));
         if (current.behavior !== previousBehavior.current) {
           previousBehavior.current = current.behavior;
           setEvents(prev => [{ time: current.time, behavior: current.behavior }, ...prev].slice(0, 4));
@@ -70,7 +78,7 @@ export default function App() {
         rendered = now;
       }
       if (options.current.running && now - sampled > 200) {
-        setHistory(prev => [...prev.slice(-89), (engine.current.state.activities.AL_L + engine.current.state.activities.AL_R) / 2]);
+        setHistory(prev => [...prev.slice(-89), (engine.state.activities.AL_L + engine.state.activities.AL_R) / 2]);
         sampled = now;
       }
       frame = requestAnimationFrame(tick);
@@ -105,15 +113,15 @@ export default function App() {
     setSelectedId(remaining[0].id);
   };
   const resetFlyState = () => {
-    engine.current.reset(42);
-    setState(snapshot(engine.current));
-    previousBehavior.current = engine.current.state.behavior;
+    engine.reset(newTrialSeed(engine.initialConditions.seed));
+    setState(snapshot(engine));
+    previousBehavior.current = engine.state.behavior;
     setHistory(Array(90).fill(0));
     setEvents([{ time: 0, behavior: 'exploring' }]);
   };
   const resetFly = () => {
     resetFlyState();
-    setToast('초파리를 중앙으로 초기화했습니다. 화학물질 배치는 유지됩니다.');
+    setToast('화학물질은 유지하고 초파리를 중앙으로 되돌렸습니다. 시작 방향과 탐색 움직임은 새로 정합니다.');
   };
   const reset = () => {
     resetFlyState();
@@ -123,7 +131,7 @@ export default function App() {
     setToast('화학물질 배치와 초파리를 모두 초기화했습니다.');
   };
   const exportExperiment = () => {
-    const payload = { application: 'Flywire Lab', schemaVersion: 2, exportedAt: new Date().toISOString(), seed: 42, model: 'Phenomenological autonomous behavior; not a whole-brain emulation', anatomy: 'FlyWire female FAFB v783 / annotations v2.0.0', time: state.time, sources, state, events,
+    const payload = { application: 'Flywire Lab', schemaVersion: 2, exportedAt: new Date().toISOString(), seed: engine.initialConditions.seed, behaviorModelVersion: BEHAVIOR_MODEL_VERSION, initialConditions: engine.initialConditions, model: 'Phenomenological autonomous behavior; not a whole-brain emulation', anatomy: 'FlyWire female FAFB v783 / annotations v2.0.0', time: state.time, sources, state, events,
       chemicalModel: { concentrationMeaning: 'Nominal solution percent; basis recorded separately. Not calibrated gas-phase concentration.', doseScaling: 'Within each organic chemical, amount/100 multiplied by nominal percent divided by reference percent. Cross-chemical sensitivity is not calibrated.', controls: 'DW and 1x PBS have zero olfactory drive; humidity, taste, pH and contact effects are not modeled.', sources: sources.map(source => ({ id: source.id, label: sourceLabel(source), concentrationBasis: source.concentrationBasis ?? 'unspecified', referenceConcentration: CHEMICALS[source.chemical].referenceConcentration ?? null, relativeStrength: sourceStrength(source), responseValence: sourceValence(source), isControl: CHEMICALS[source.chemical].isControl })) },
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
@@ -186,8 +194,8 @@ export default function App() {
             <div className="arena-footer"><div className="arena-legend"><span><i className="legend-fly"/>초파리</span><span><i className="legend-field"/>화학물질 농도</span></div><span className="arena-hint">드래그하여 환경 조절</span></div>
             <div className="playback-bar"><button className={`play-button ${running ? '' : 'paused'}`} onClick={() => setRunning(v => !v)} aria-label={running ? '시뮬레이션 일시정지' : '시뮬레이션 재생'}>{running ? <Pause size={15} fill="currentColor"/> : <Play size={15} fill="currentColor"/>}<span>{running ? '일시정지' : '실험 시작'}</span></button><span className="playback-divider"/><div className="clock"><Clock3 size={14}/><span data-testid="simulation-time">{formatTime(state.time)}</span></div><div className="speed-controls" aria-label="시뮬레이션 속도">{[0.5, 1, 2, 4].map(value => <button key={value} className={speed === value ? 'selected' : ''} onClick={() => setSpeed(value)} aria-pressed={speed === value}>{value}×</button>)}</div></div>
             <div className="reset-actions">
-              <button className="fly-reset-button" onClick={resetFly} aria-label="초파리만 초기화" title="물질 배치는 유지하고 초파리 위치·기억·허기·시간·활동 기록을 초기화합니다."><Focus size={14}/><span>초파리만 초기화</span></button>
-              <span className="reset-hint">화학물질 배치 유지</span>
+              <button className="fly-reset-button" onClick={resetFly} aria-label="초파리만 초기화" title="물질 배치를 유지하고 초파리를 중앙으로 되돌립니다. 기억·허기·시간·활동 기록을 초기화하고 시작 방향과 탐색 움직임을 새로 정합니다."><Focus size={14}/><span>초파리만 초기화</span></button>
+              <span className="reset-hint">물질 유지 · 시작 방향 무작위</span>
               <button className="full-reset-button" onClick={reset} aria-label="실험 초기화" title="화학물질 배치까지 처음 상태로 되돌립니다."><RotateCcw size={13}/><span>전체 초기화</span></button>
             </div>
           </div>
