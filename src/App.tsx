@@ -51,10 +51,10 @@ export default function App() {
   const options = useRef({ sources, running, speed });
   options.current = { sources, running, speed };
   const nextId = useRef(3);
+  const previousBehavior = useRef(engine.current.state.behavior);
 
   useEffect(() => {
     let frame = 0, last = 0, rendered = 0, sampled = 0;
-    let previousBehavior = engine.current.state.behavior;
     const tick = (now: number) => {
       if (last && options.current.running) {
         engine.current.step(Math.min((now - last) / 1000, 0.06) * options.current.speed, options.current.sources);
@@ -63,8 +63,8 @@ export default function App() {
       if (now - rendered > 1000 / 30) {
         const current = engine.current.state;
         setState(snapshot(engine.current));
-        if (current.behavior !== previousBehavior) {
-          previousBehavior = current.behavior;
+        if (current.behavior !== previousBehavior.current) {
+          previousBehavior.current = current.behavior;
           setEvents(prev => [{ time: current.time, behavior: current.behavior }, ...prev].slice(0, 4));
         }
         rendered = now;
@@ -104,15 +104,23 @@ export default function App() {
     setSources(remaining);
     setSelectedId(remaining[0].id);
   };
-  const reset = () => {
+  const resetFlyState = () => {
     engine.current.reset(42);
     setState(snapshot(engine.current));
+    previousBehavior.current = engine.current.state.behavior;
+    setHistory(Array(90).fill(0));
+    setEvents([{ time: 0, behavior: 'exploring' }]);
+  };
+  const resetFly = () => {
+    resetFlyState();
+    setToast('초파리를 중앙으로 초기화했습니다. 화학물질 배치는 유지됩니다.');
+  };
+  const reset = () => {
+    resetFlyState();
     setSources(initialSources());
     setSelectedId('source-1');
     nextId.current = 3;
-    setHistory(Array(90).fill(0));
-    setEvents([{ time: 0, behavior: 'exploring' }]);
-    setToast('실험을 초기 상태로 되돌렸습니다.');
+    setToast('화학물질 배치와 초파리를 모두 초기화했습니다.');
   };
   const exportExperiment = () => {
     const payload = { application: 'Flywire Lab', schemaVersion: 2, exportedAt: new Date().toISOString(), seed: 42, model: 'Phenomenological autonomous behavior; not a whole-brain emulation', anatomy: 'FlyWire female FAFB v783 / annotations v2.0.0', time: state.time, sources, state, events,
@@ -176,7 +184,12 @@ export default function App() {
             <div className="arena-heading"><div className="arena-title"><span className={`status-dot ${running ? 'live' : ''}`}/><h2>관찰 공간</h2><span className="live-tag">{running ? 'LIVE' : 'PAUSED'}</span></div><div className="view-actions"><button className={`icon-button ${showTrail ? 'active' : ''}`} aria-label="이동 경로 표시" aria-pressed={showTrail} onClick={() => setShowTrail(v => !v)} title="이동 경로"><Route size={16}/></button><button className={`icon-button ${showField ? 'active' : ''}`} aria-label="농도 분포 표시" aria-pressed={showField} onClick={() => setShowField(v => !v)} title="농도 분포"><Layers3 size={16}/></button></div></div>
             <div className="arena-viewport"><WorldCanvas state={state} sources={sources} selectedId={selected.id} onSelect={setSelectedId} onMove={moveSource} showField={showField} showTrail={showTrail}/><div className="arena-coordinate"><Focus size={12}/><span>100 × 70 mm</span><span className="arena-coordinate-sep">/</span><span>TOP VIEW</span></div><div className="arena-compass"><span>N</span><div>↑</div></div><div className="arena-subject"><span className="subject-id">F–01</span><span>♀ 성체 초파리</span></div>{!running && <div className="pause-overlay"><Pause size={13}/> 관찰 일시정지</div>}</div>
             <div className="arena-footer"><div className="arena-legend"><span><i className="legend-fly"/>초파리</span><span><i className="legend-field"/>화학물질 농도</span></div><span className="arena-hint">드래그하여 환경 조절</span></div>
-            <div className="playback-bar"><button className={`play-button ${running ? '' : 'paused'}`} onClick={() => setRunning(v => !v)} aria-label={running ? '시뮬레이션 일시정지' : '시뮬레이션 재생'}>{running ? <Pause size={15} fill="currentColor"/> : <Play size={15} fill="currentColor"/>}<span>{running ? '일시정지' : '실험 시작'}</span></button><button className="icon-button reset-button" onClick={reset} aria-label="실험 초기화" title="초기화"><RotateCcw size={16}/></button><span className="playback-divider"/><div className="clock"><Clock3 size={14}/><span data-testid="simulation-time">{formatTime(state.time)}</span></div><div className="speed-controls" aria-label="시뮬레이션 속도">{[0.5, 1, 2, 4].map(value => <button key={value} className={speed === value ? 'selected' : ''} onClick={() => setSpeed(value)} aria-pressed={speed === value}>{value}×</button>)}</div></div>
+            <div className="playback-bar"><button className={`play-button ${running ? '' : 'paused'}`} onClick={() => setRunning(v => !v)} aria-label={running ? '시뮬레이션 일시정지' : '시뮬레이션 재생'}>{running ? <Pause size={15} fill="currentColor"/> : <Play size={15} fill="currentColor"/>}<span>{running ? '일시정지' : '실험 시작'}</span></button><span className="playback-divider"/><div className="clock"><Clock3 size={14}/><span data-testid="simulation-time">{formatTime(state.time)}</span></div><div className="speed-controls" aria-label="시뮬레이션 속도">{[0.5, 1, 2, 4].map(value => <button key={value} className={speed === value ? 'selected' : ''} onClick={() => setSpeed(value)} aria-pressed={speed === value}>{value}×</button>)}</div></div>
+            <div className="reset-actions">
+              <button className="fly-reset-button" onClick={resetFly} aria-label="초파리만 초기화" title="물질 배치는 유지하고 초파리 위치·기억·허기·시간·활동 기록을 초기화합니다."><Focus size={14}/><span>초파리만 초기화</span></button>
+              <span className="reset-hint">화학물질 배치 유지</span>
+              <button className="full-reset-button" onClick={reset} aria-label="실험 초기화" title="화학물질 배치까지 처음 상태로 되돌립니다."><RotateCcw size={13}/><span>전체 초기화</span></button>
+            </div>
           </div>
           <div className="behavior-panel panel"><div className="behavior-icon" style={{ color: currentBehavior.color }}><Radio size={22}/><span/></div><div className="behavior-copy"><div className="behavior-eyebrow">현재 행동 <span>AUTONOMOUS</span></div><h3>{currentBehavior.title}</h3><p>{currentBehavior.desc}</p></div><div className="behavior-meter"><Activity size={19}/><span>감각 → 행동</span></div></div>
           <div className="experiment-footnote"><Microscope size={13}/><span>관찰해 보세요: 먹이의 방출량을 높이거나, 회피 물질을 이동 경로에 놓아보세요.</span></div>
